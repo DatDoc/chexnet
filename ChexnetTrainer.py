@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import time
+import re
 import sys
 
 import torch
@@ -207,9 +208,22 @@ class ChexnetTrainer ():
         elif nnArchitecture == 'DENSE-NET-201': model = DenseNet201(nnClassCount, nnIsTrained).cuda()
         
         model = torch.nn.DataParallel(model).cuda() 
-        
-        modelCheckpoint = torch.load(pathModel)
-        model.load_state_dict(modelCheckpoint['state_dict'])
+
+        # Code modified from torchvision densenet source for loading from pre .4 densenet weights.
+        checkpoint = torch.load(pathModel)
+        state_dict = checkpoint['state_dict']
+        remove_data_parallel = False # Change if you don't want to use nn.DataParallel(model)
+
+        pattern = re.compile(
+            r'^(.*denselayer\d+\.(?:norm|relu|conv))\.((?:[12])\.(?:weight|bias|running_mean|running_var))$')
+        for key in list(state_dict.keys()):
+            match = pattern.match(key)
+            new_key = match.group(1) + match.group(2) if match else key
+            new_key = new_key[7:] if remove_data_parallel else new_key
+            state_dict[new_key] = state_dict[key]
+            # Delete old key only if modified.
+            if match or remove_data_parallel: 
+                del state_dict[key]
 
         #-------------------- SETTINGS: DATA TRANSFORMS, TEN CROPS
         normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
